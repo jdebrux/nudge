@@ -2,7 +2,11 @@
 // core of nudge. It is pure domain logic: no file I/O, no CLI, no rendering.
 package nudge
 
-import "time"
+import (
+	"encoding/json"
+	"fmt"
+	"time"
+)
 
 // Phase is one of the three states nudge tracks.
 type Phase int
@@ -13,11 +17,49 @@ const (
 	Rest
 )
 
+// String returns the lowercase name used both for display and as the
+// persisted JSON representation, so a state file reads as "focus" rather
+// than an opaque integer.
+func (p Phase) String() string {
+	switch p {
+	case Focus:
+		return "focus"
+	case Rest:
+		return "rest"
+	default:
+		return "idle"
+	}
+}
+
+// MarshalJSON encodes Phase as its lowercase name.
+func (p Phase) MarshalJSON() ([]byte, error) {
+	return json.Marshal(p.String())
+}
+
+// UnmarshalJSON decodes Phase from its lowercase name.
+func (p *Phase) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	switch s {
+	case "idle":
+		*p = Idle
+	case "focus":
+		*p = Focus
+	case "rest":
+		*p = Rest
+	default:
+		return fmt.Errorf("nudge: unknown phase %q", s)
+	}
+	return nil
+}
+
 // State is the current rhythm state, persisted between invocations.
 type State struct {
-	Phase Phase
-	Since time.Time
-	Until *time.Time // nil means open-ended
+	Phase Phase      `json:"phase"`
+	Since time.Time  `json:"since"`
+	Until *time.Time `json:"until,omitempty"` // nil means open-ended
 }
 
 // In begins a focus period, from IDLE or REST — one verb covers both,
