@@ -12,6 +12,7 @@ import (
 	"github.com/jdebrux/nudge/internal/nudge"
 	"github.com/jdebrux/nudge/internal/render"
 	"github.com/jdebrux/nudge/internal/store"
+	"github.com/jdebrux/nudge/internal/watch"
 )
 
 const (
@@ -61,9 +62,29 @@ func run(args []string, now time.Time) error {
 		return applyOut(path, current, now, duration)
 	case "done":
 		return applyDone(path, current, now)
+	case watch.Subcommand:
+		return runWatch(path, args[1:])
 	default:
 		return fmt.Errorf("unknown command %q", cmd)
 	}
+}
+
+// runWatch is the hidden re-exec entry point spawned by save() to
+// deliver the terminal-bell cue for a timed phase. Not a user-facing
+// command.
+func runWatch(path string, args []string) error {
+	if len(args) != 3 {
+		return fmt.Errorf("%s: expected phase, since, and until", watch.Subcommand)
+	}
+	since, err := time.Parse(time.RFC3339Nano, args[1])
+	if err != nil {
+		return err
+	}
+	until, err := time.Parse(time.RFC3339Nano, args[2])
+	if err != nil {
+		return err
+	}
+	return watch.Wait(path, args[0], since, until)
 }
 
 // bare is what a plain `nudge` runs: show status, or start the default
@@ -111,6 +132,9 @@ func applyDone(path string, current nudge.State, now time.Time) error {
 func save(path string, next nudge.State, now time.Time) error {
 	if err := store.Save(path, next); err != nil {
 		return err
+	}
+	if err := watch.Spawn(next); err != nil {
+		fmt.Fprintln(os.Stderr, "nudge: couldn't schedule a cue:", err)
 	}
 	fmt.Println(render.Status(next, now))
 	return nil
