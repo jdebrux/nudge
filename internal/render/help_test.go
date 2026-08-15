@@ -10,7 +10,7 @@ func TestHelpListsEveryCommand(t *testing.T) {
 
 	for _, want := range []string{
 		"nudge", "nudge in", "nudge out", "nudge later", "nudge done",
-		"nudge status", "nudge loop start|stop", "nudge config",
+		"nudge status", "nudge prompt", "nudge loop start|stop", "nudge config",
 		"nudge config set", "nudge await -- <cmd>", "nudge help",
 	} {
 		if !strings.Contains(got, want) {

@@ -11,9 +11,10 @@ var helpRows = []struct{ cmd, desc string }{
 	{"nudge later", "postpone the next cue"},
 	{"nudge done", "stop tracking entirely"},
 	{"nudge status", "what state am I in, time remaining"},
+	{"nudge prompt", "one-line status for embedding in your shell prompt"},
 	{"nudge loop start|stop", "manage a repeating rhythm"},
 	{"nudge config", "show current defaults"},
-	{"nudge config set <key> <value>", "set a default (focus, break, long-break, every)"},
+	{"nudge config set <key> <value>", "set a default (focus, break, long-break, every, repeat, repeat-limit)"},
 	{"nudge await -- <cmd>", "run a command, return to focus when it exits"},
 	{"nudge help", "show this"},
 }
