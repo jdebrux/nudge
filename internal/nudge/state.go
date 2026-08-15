@@ -57,10 +57,12 @@ func (p *Phase) UnmarshalJSON(data []byte) error {
 
 // State is the current rhythm state, persisted between invocations.
 type State struct {
-	Phase   Phase      `json:"phase"`
-	Since   time.Time  `json:"since"`
-	Until   *time.Time `json:"until,omitempty"`    // nil means open-ended
-	NextCue *time.Time `json:"next_cue,omitempty"` // when the next bell fires; starts equal to Until, moved forward by Later
+	Phase             Phase      `json:"phase"`
+	Since             time.Time  `json:"since"`
+	Until             *time.Time `json:"until,omitempty"`    // nil means open-ended
+	NextCue           *time.Time `json:"next_cue,omitempty"` // when the next bell fires; starts equal to Until, moved forward by Later
+	LoopActive        bool       `json:"loop_active,omitempty"`
+	SessionsCompleted int        `json:"sessions_completed,omitempty"` // completed focus sessions since the loop started
 }
 
 // In begins a focus period, from IDLE or REST — one verb covers both,
@@ -70,7 +72,7 @@ func (s State) In(now time.Time, duration time.Duration) (State, bool) {
 	if s.Phase == Focus {
 		return s, false
 	}
-	return newState(Focus, now, duration), true
+	return s.transitionTo(Focus, now, duration), true
 }
 
 // Out begins a break. Only valid from FOCUS; calling Out from IDLE or REST
@@ -79,16 +81,21 @@ func (s State) Out(now time.Time, duration time.Duration) (State, bool) {
 	if s.Phase != Focus {
 		return s, false
 	}
-	return newState(Rest, now, duration), true
+	return s.transitionTo(Rest, now, duration), true
 }
 
 // Done stops tracking entirely, returning to IDLE from either FOCUS or
-// REST. Calling Done while already IDLE is a no-op.
+// REST — including disarming an active loop, per PRODUCT.md §4: "nudge
+// done stops tracking altogether for the day... regardless of whether a
+// loop was running." Calling Done while already IDLE is a no-op.
 func (s State) Done(now time.Time) (State, bool) {
 	if s.Phase == Idle {
 		return s, false
 	}
-	return newState(Idle, now, 0), true
+	next := s.transitionTo(Idle, now, 0)
+	next.LoopActive = false
+	next.SessionsCompleted = 0
+	return next, true
 }
 
 // Later postpones the next cue by delay, without changing the current
@@ -105,13 +112,59 @@ func (s State) Later(now time.Time, delay time.Duration) (State, bool) {
 	return s, true
 }
 
-func newState(phase Phase, since time.Time, duration time.Duration) State {
-	s := State{Phase: phase, Since: since}
+// StartLoop arms the repeating rhythm: subsequent focus sessions are
+// counted, and CompletedFocusSession signals when a long break is due.
+// It never touches the current phase/session — mirrors StopLoop's same
+// guarantee (PRODUCT.md §4: "nudge loop stop ends a repeating rhythm but
+// nudge may still be tracking a single in-progress focus/rest period").
+// Calling StartLoop while already active is a no-op.
+func (s State) StartLoop() (State, bool) {
+	if s.LoopActive {
+		return s, false
+	}
+	s.LoopActive = true
+	s.SessionsCompleted = 0
+	return s, true
+}
+
+// StopLoop disarms the loop without touching the current phase/session.
+// Calling StopLoop while not active is a no-op.
+func (s State) StopLoop() (State, bool) {
+	if !s.LoopActive {
+		return s, false
+	}
+	s.LoopActive = false
+	return s, true
+}
+
+// CompletedFocusSession records that a focus session just ended and
+// reports whether this was the Nth one (per sessionsPerLongBreak) — the
+// signal to use a long break instead of a short one. A no-op (false,
+// counter untouched) when the loop isn't active.
+func (s State) CompletedFocusSession(sessionsPerLongBreak int) (State, bool) {
+	if !s.LoopActive {
+		return s, false
+	}
+	s.SessionsCompleted++
+	dueForLongBreak := s.SessionsCompleted%sessionsPerLongBreak == 0
+	return s, dueForLongBreak
+}
+
+// transitionTo builds the state for entering phase at since, carrying
+// loop bookkeeping forward from s (only Done clears it — see above) and
+// setting Until/NextCue for a timed session (duration > 0).
+func (s State) transitionTo(phase Phase, since time.Time, duration time.Duration) State {
+	next := State{
+		Phase:             phase,
+		Since:             since,
+		LoopActive:        s.LoopActive,
+		SessionsCompleted: s.SessionsCompleted,
+	}
 	if duration > 0 {
 		until := since.Add(duration)
-		s.Until = &until
+		next.Until = &until
 		nextCue := until
-		s.NextCue = &nextCue
+		next.NextCue = &nextCue
 	}
-	return s
+	return next
 }

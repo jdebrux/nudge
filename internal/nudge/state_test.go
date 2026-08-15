@@ -186,3 +186,134 @@ func TestLater(t *testing.T) {
 		})
 	}
 }
+
+func TestLoopBookkeepingAcrossTransitions(t *testing.T) {
+	t.Run("in and out preserve LoopActive and SessionsCompleted", func(t *testing.T) {
+		start := State{Phase: Rest, Since: now.Add(-5 * time.Minute), LoopActive: true, SessionsCompleted: 2}
+
+		focused, applied := start.In(now, 25*time.Minute)
+		if !applied {
+			t.Fatalf("In: applied = false, want true")
+		}
+		if !focused.LoopActive || focused.SessionsCompleted != 2 {
+			t.Fatalf("In: LoopActive=%v SessionsCompleted=%d, want true/2", focused.LoopActive, focused.SessionsCompleted)
+		}
+
+		rested, applied := focused.Out(now, 5*time.Minute)
+		if !applied {
+			t.Fatalf("Out: applied = false, want true")
+		}
+		if !rested.LoopActive || rested.SessionsCompleted != 2 {
+			t.Fatalf("Out: LoopActive=%v SessionsCompleted=%d, want true/2", rested.LoopActive, rested.SessionsCompleted)
+		}
+	})
+
+	t.Run("done clears the loop entirely", func(t *testing.T) {
+		start := State{Phase: Focus, Since: now.Add(-5 * time.Minute), LoopActive: true, SessionsCompleted: 3}
+
+		idle, applied := start.Done(now)
+		if !applied {
+			t.Fatalf("Done: applied = false, want true")
+		}
+		if idle.LoopActive || idle.SessionsCompleted != 0 {
+			t.Fatalf("Done: LoopActive=%v SessionsCompleted=%d, want false/0", idle.LoopActive, idle.SessionsCompleted)
+		}
+	})
+}
+
+func TestStartStopLoop(t *testing.T) {
+	t.Run("start arms an inactive loop and resets the counter", func(t *testing.T) {
+		start := State{Phase: Focus, SessionsCompleted: 7}
+
+		got, applied := start.StartLoop()
+
+		if !applied {
+			t.Fatalf("applied = false, want true")
+		}
+		if !got.LoopActive || got.SessionsCompleted != 0 {
+			t.Fatalf("LoopActive=%v SessionsCompleted=%d, want true/0", got.LoopActive, got.SessionsCompleted)
+		}
+	})
+
+	t.Run("start while already active is a no-op", func(t *testing.T) {
+		start := State{Phase: Focus, LoopActive: true, SessionsCompleted: 2}
+
+		got, applied := start.StartLoop()
+
+		if applied {
+			t.Fatalf("applied = true, want false")
+		}
+		if got != start {
+			t.Fatalf("no-op mutated state: got %+v, want unchanged %+v", got, start)
+		}
+	})
+
+	t.Run("stop disarms an active loop without touching the session", func(t *testing.T) {
+		start := State{Phase: Focus, Since: now, LoopActive: true, SessionsCompleted: 2}
+
+		got, applied := start.StopLoop()
+
+		if !applied {
+			t.Fatalf("applied = false, want true")
+		}
+		if got.LoopActive {
+			t.Fatalf("LoopActive = true, want false")
+		}
+		if got.Phase != Focus || !got.Since.Equal(now) {
+			t.Fatalf("in-progress session was touched: got %+v", got)
+		}
+	})
+
+	t.Run("stop while already inactive is a no-op", func(t *testing.T) {
+		start := State{Phase: Idle}
+
+		got, applied := start.StopLoop()
+
+		if applied {
+			t.Fatalf("applied = true, want false")
+		}
+		if got != start {
+			t.Fatalf("no-op mutated state: got %+v, want unchanged %+v", got, start)
+		}
+	})
+}
+
+func TestCompletedFocusSession(t *testing.T) {
+	t.Run("no-op when the loop isn't active", func(t *testing.T) {
+		start := State{Phase: Focus, SessionsCompleted: 3}
+
+		got, due := start.CompletedFocusSession(4)
+
+		if due {
+			t.Fatalf("due = true, want false")
+		}
+		if got != start {
+			t.Fatalf("no-op mutated state: got %+v, want unchanged %+v", got, start)
+		}
+	})
+
+	t.Run("increments and signals on every Nth session", func(t *testing.T) {
+		s := State{LoopActive: true}
+		var due bool
+
+		for i := 1; i <= 4; i++ {
+			s, due = s.CompletedFocusSession(4)
+			if s.SessionsCompleted != i {
+				t.Fatalf("after session %d: SessionsCompleted = %d, want %d", i, s.SessionsCompleted, i)
+			}
+			wantDue := i == 4
+			if due != wantDue {
+				t.Fatalf("after session %d: due = %v, want %v", i, due, wantDue)
+			}
+		}
+
+		// The cycle repeats: the 8th session is due again, the 5th-7th aren't.
+		for i := 5; i <= 8; i++ {
+			s, due = s.CompletedFocusSession(4)
+			wantDue := i == 8
+			if due != wantDue {
+				t.Fatalf("after session %d: due = %v, want %v", i, due, wantDue)
+			}
+		}
+	})
+}
