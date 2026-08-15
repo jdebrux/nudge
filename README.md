@@ -2,8 +2,7 @@
 
 [![Go Reference](https://img.shields.io/badge/go-1.26-blue)](go.mod)
 
-A quiet CLI companion for building a healthier rhythm around computer work. Not a
-Pomodoro timer, not a productivity optimizer — nudge tracks one thing: **focus → pause
+A quiet CLI companion for building a healthier rhythm when focussing. nudge tracks one thing: **focus → pause
 → recover → return**, and gives you a small, well-timed cue at the edges of that cycle.
 You stay in control throughout; nudge prompts, it never enforces.
 
