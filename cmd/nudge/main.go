@@ -72,6 +72,9 @@ func run(args []string, now time.Time) (int, error) {
 	case "status":
 		fmt.Println(render.Status(current, now))
 		return 0, nil
+	case "prompt":
+		fmt.Println(render.Prompt(current, now))
+		return 0, nil
 	case "in":
 		explicit, err := parseExplicitDuration(args[1:])
 		if err != nil {
