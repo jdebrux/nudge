@@ -5,8 +5,10 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"strconv"
 	"time"
 
@@ -20,29 +22,38 @@ import (
 const defaultLaterDelay = 5 * time.Minute
 
 func main() {
-	if err := run(os.Args[1:], time.Now()); err != nil {
+	code, err := run(os.Args[1:], time.Now())
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "nudge:", err)
-		os.Exit(1)
+		if code == 0 {
+			code = 1
+		}
 	}
+	os.Exit(code)
 }
 
-func run(args []string, now time.Time) error {
+// run returns an exit code alongside the usual error. Every command
+// except `await` always returns 0 here — await is the one deliberate
+// exception to "every command returns immediately" (PRODUCT.md's
+// deployment scenario, §5): it runs a child command itself and mirrors
+// that child's exit code back out.
+func run(args []string, now time.Time) (int, error) {
 	path, err := store.DefaultPath()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	current, err := store.Load(path)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	cfgPath, err := config.DefaultPath()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	var cmd string
@@ -52,39 +63,100 @@ func run(args []string, now time.Time) error {
 
 	switch cmd {
 	case "":
-		return bare(path, current, cfg, now)
+		return 0, bare(path, current, cfg, now)
 	case "status":
 		fmt.Println(render.Status(current, now))
-		return nil
+		return 0, nil
 	case "in":
 		explicit, err := parseExplicitDuration(args[1:])
 		if err != nil {
-			return err
+			return 0, err
 		}
 		duration := cfg.Focus
 		if explicit != nil {
 			duration = *explicit
 		}
-		return applyIn(path, current, now, duration)
+		return 0, applyIn(path, current, now, duration)
 	case "out":
 		explicit, err := parseExplicitDuration(args[1:])
 		if err != nil {
-			return err
+			return 0, err
 		}
-		return applyOut(path, current, cfg, now, explicit)
+		return 0, applyOut(path, current, cfg, now, explicit)
 	case "done":
-		return applyDone(path, current, now)
+		return 0, applyDone(path, current, now)
 	case "later":
-		return applyLater(path, current, now)
+		return 0, applyLater(path, current, now)
 	case "config":
-		return runConfig(cfgPath, cfg, args[1:])
+		return 0, runConfig(cfgPath, cfg, args[1:])
 	case "loop":
-		return runLoop(path, current, args[1:])
+		return 0, runLoop(path, current, args[1:])
+	case "await":
+		return applyAwait(path, current, cfg, now, args[1:])
 	case watch.Subcommand:
-		return runWatch(path, args[1:])
+		return 0, runWatch(path, args[1:])
 	default:
-		return fmt.Errorf("unknown command %q", cmd)
+		return 0, fmt.Errorf("unknown command %q", cmd)
 	}
+}
+
+// applyAwait runs cmdArgs itself, blocking until it exits. It behaves
+// like an open-ended `out` for the duration — no fixed cue, since the
+// real signal here is the command finishing, not a timer — and
+// auto-returns to FOCUS the instant it exits, regardless of the child's
+// exit code. Only valid from FOCUS, same as `out`; the guard is checked
+// before the command ever runs, so a no-op truly has zero side effects.
+func applyAwait(path string, current nudge.State, cfg config.Config, now time.Time, args []string) (int, error) {
+	if len(args) == 0 || args[0] != "--" || len(args) == 1 {
+		return 0, fmt.Errorf("usage: nudge await -- <command>")
+	}
+	cmdArgs := args[1:]
+
+	if current.Phase != nudge.Focus {
+		if current.Phase == nudge.Idle {
+			fmt.Println(render.NotFocused())
+		} else {
+			fmt.Println(render.AlreadyOnABreak(current, now))
+		}
+		return 0, nil
+	}
+
+	child := exec.Command(cmdArgs[0], cmdArgs[1:]...)
+	child.Stdin = os.Stdin
+	child.Stdout = os.Stdout
+	child.Stderr = os.Stderr
+
+	if err := child.Start(); err != nil {
+		return 0, err
+	}
+
+	resting, applied := current.Out(time.Now(), 0)
+	if applied {
+		if err := store.Save(path, resting); err != nil {
+			return 0, err
+		}
+		fmt.Println(render.Status(resting, time.Now()))
+	}
+
+	waitErr := child.Wait()
+
+	returned := time.Now()
+	focused, applied := resting.In(returned, cfg.Focus)
+	if applied {
+		if err := persist(path, focused); err != nil {
+			return 0, err
+		}
+		fmt.Println(render.Status(focused, returned))
+	}
+
+	if waitErr != nil {
+		var exitErr *exec.ExitError
+		if errors.As(waitErr, &exitErr) {
+			return exitErr.ExitCode(), nil
+		}
+		return 0, waitErr
+	}
+	return 0, nil
 }
 
 // runLoop handles `nudge loop start` and `nudge loop stop`.
