@@ -12,35 +12,49 @@ import (
 )
 
 var since = time.Date(2026, 8, 11, 9, 0, 0, 0, time.UTC)
-var until = since.Add(25 * time.Minute)
+var cueAt = since.Add(25 * time.Minute)
 
 func TestStillCurrentMatches(t *testing.T) {
-	s := nudge.State{Phase: nudge.Focus, Since: since, Until: &until}
-	if !stillCurrent(s, "focus", since, until) {
+	s := nudge.State{Phase: nudge.Focus, Since: since, Until: &cueAt, NextCue: &cueAt}
+	if !stillCurrent(s, "focus", since, cueAt) {
 		t.Fatal("expected matching state to be current")
 	}
 }
 
 func TestStillCurrentDetectsPhaseChange(t *testing.T) {
 	s := nudge.State{Phase: nudge.Idle, Since: since}
-	if stillCurrent(s, "focus", since, until) {
+	if stillCurrent(s, "focus", since, cueAt) {
 		t.Fatal("expected phase change to make the cue stale")
 	}
 }
 
 func TestStillCurrentDetectsNewSession(t *testing.T) {
 	newSince := since.Add(30 * time.Minute)
-	newUntil := newSince.Add(10 * time.Minute)
-	s := nudge.State{Phase: nudge.Rest, Since: newSince, Until: &newUntil}
-	if stillCurrent(s, "focus", since, until) {
+	newCueAt := newSince.Add(10 * time.Minute)
+	s := nudge.State{Phase: nudge.Rest, Since: newSince, Until: &newCueAt, NextCue: &newCueAt}
+	if stillCurrent(s, "focus", since, cueAt) {
 		t.Fatal("expected a superseding session to make the cue stale")
+	}
+}
+
+func TestStillCurrentDetectsLaterPostponement(t *testing.T) {
+	// Same session (Phase/Since unchanged), but `later` moved NextCue
+	// forward without touching Until — the original watcher's cue is
+	// now stale even though nothing else about the session changed.
+	postponed := cueAt.Add(5 * time.Minute)
+	s := nudge.State{Phase: nudge.Focus, Since: since, Until: &cueAt, NextCue: &postponed}
+	if stillCurrent(s, "focus", since, cueAt) {
+		t.Fatal("expected a later-postponed cue to make the original watcher stale")
+	}
+	if !stillCurrent(s, "focus", since, postponed) {
+		t.Fatal("expected the new watcher scheduled for the postponed time to be current")
 	}
 }
 
 func TestWaitFiresBellWhenStateStillMatches(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 	target := time.Now().Add(20 * time.Millisecond)
-	s := nudge.State{Phase: nudge.Focus, Since: time.Now(), Until: &target}
+	s := nudge.State{Phase: nudge.Focus, Since: time.Now(), Until: &target, NextCue: &target}
 	if err := store.Save(path, s); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
