@@ -57,9 +57,10 @@ func (p *Phase) UnmarshalJSON(data []byte) error {
 
 // State is the current rhythm state, persisted between invocations.
 type State struct {
-	Phase Phase      `json:"phase"`
-	Since time.Time  `json:"since"`
-	Until *time.Time `json:"until,omitempty"` // nil means open-ended
+	Phase   Phase      `json:"phase"`
+	Since   time.Time  `json:"since"`
+	Until   *time.Time `json:"until,omitempty"`    // nil means open-ended
+	NextCue *time.Time `json:"next_cue,omitempty"` // when the next bell fires; starts equal to Until, moved forward by Later
 }
 
 // In begins a focus period, from IDLE or REST — one verb covers both,
@@ -90,11 +91,27 @@ func (s State) Done(now time.Time) (State, bool) {
 	return newState(Idle, now, 0), true
 }
 
+// Later postpones the next cue by delay, without changing the current
+// phase — Since and Until are untouched, only NextCue moves. This is a
+// "not yet, ask again shortly" reaction to a cue, not a state
+// transition. Calling Later with no timed cue pending (IDLE, or an
+// open-ended session) is a no-op.
+func (s State) Later(now time.Time, delay time.Duration) (State, bool) {
+	if s.Phase == Idle || s.NextCue == nil {
+		return s, false
+	}
+	next := now.Add(delay)
+	s.NextCue = &next
+	return s, true
+}
+
 func newState(phase Phase, since time.Time, duration time.Duration) State {
 	s := State{Phase: phase, Since: since}
 	if duration > 0 {
 		until := since.Add(duration)
 		s.Until = &until
+		nextCue := until
+		s.NextCue = &nextCue
 	}
 	return s
 }

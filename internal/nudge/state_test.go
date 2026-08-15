@@ -113,6 +113,76 @@ func TestTransitions(t *testing.T) {
 			case !c.wantUntil && got.Until != nil:
 				t.Fatalf("expected Until to be nil, got %v", *got.Until)
 			}
+			// NextCue starts out equal to Until — Later is the only
+			// thing that ever makes them diverge.
+			switch {
+			case c.wantUntil && (got.NextCue == nil || !got.NextCue.Equal(*got.Until)):
+				t.Fatalf("expected NextCue to equal Until, got NextCue=%v Until=%v", got.NextCue, got.Until)
+			case !c.wantUntil && got.NextCue != nil:
+				t.Fatalf("expected NextCue to be nil, got %v", *got.NextCue)
+			}
+		})
+	}
+}
+
+func TestLater(t *testing.T) {
+	until := now.Add(20 * time.Minute)
+	delay := 5 * time.Minute
+
+	cases := []struct {
+		name        string
+		start       State
+		wantApplied bool
+	}{
+		{
+			name:        "postpones a pending focus cue",
+			start:       State{Phase: Focus, Since: now.Add(-5 * time.Minute), Until: &until, NextCue: &until},
+			wantApplied: true,
+		},
+		{
+			name:        "postpones a pending rest cue",
+			start:       State{Phase: Rest, Since: now.Add(-1 * time.Minute), Until: &until, NextCue: &until},
+			wantApplied: true,
+		},
+		{
+			name:        "no-op while idle",
+			start:       State{Phase: Idle},
+			wantApplied: false,
+		},
+		{
+			name:        "no-op for an open-ended session with no cue",
+			start:       State{Phase: Focus, Since: now.Add(-5 * time.Minute)},
+			wantApplied: false,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, applied := c.start.Later(now, delay)
+
+			if applied != c.wantApplied {
+				t.Fatalf("applied = %v, want %v", applied, c.wantApplied)
+			}
+			if !c.wantApplied {
+				if got != c.start {
+					t.Fatalf("no-op mutated state: got %+v, want unchanged %+v", got, c.start)
+				}
+				return
+			}
+
+			wantNextCue := now.Add(delay)
+			if got.NextCue == nil || !got.NextCue.Equal(wantNextCue) {
+				t.Fatalf("NextCue = %v, want %v", got.NextCue, wantNextCue)
+			}
+			if got.Phase != c.start.Phase {
+				t.Fatalf("phase changed: got %v, want unchanged %v", got.Phase, c.start.Phase)
+			}
+			if !got.Since.Equal(c.start.Since) {
+				t.Fatalf("since changed: got %v, want unchanged %v", got.Since, c.start.Since)
+			}
+			if !got.Until.Equal(*c.start.Until) {
+				t.Fatalf("until changed: got %v, want unchanged %v", got.Until, c.start.Until)
+			}
 		})
 	}
 }
