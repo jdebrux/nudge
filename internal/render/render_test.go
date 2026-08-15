@@ -75,6 +75,7 @@ func TestNoOpMessages(t *testing.T) {
 		{"not focused", NotFocused(), "not focused right now"},
 		{"already on a break", AlreadyOnABreak(resting, now), "already on a break, 04:51 left"},
 		{"already idle", AlreadyIdle(), "already idle"},
+		{"nothing to postpone", NothingToPostpone(), "nothing to postpone right now"},
 	}
 
 	for _, c := range cases {
@@ -83,5 +84,16 @@ func TestNoOpMessages(t *testing.T) {
 				t.Fatalf("got %q, want %q", c.got, c.want)
 			}
 		})
+	}
+}
+
+func TestPostponed(t *testing.T) {
+	nextCue := now.Add(5 * time.Minute)
+	s := nudge.State{Phase: nudge.Focus, Since: now.Add(-20 * time.Minute), NextCue: &nextCue}
+
+	got := Postponed(s, now)
+
+	if got != "nudging again in 05:00" {
+		t.Fatalf("got %q, want %q", got, "nudging again in 05:00")
 	}
 }

@@ -45,6 +45,17 @@ func AlreadyIdle() string {
 	return "already idle"
 }
 
+// Postponed is the echo for a successful `nudge later`.
+func Postponed(s nudge.State, now time.Time) string {
+	return fmt.Sprintf("nudging again in %s", clock(*s.NextCue, now))
+}
+
+// NothingToPostpone is the no-op echo for `nudge later` when there's no
+// timed cue pending (IDLE, or an open-ended session).
+func NothingToPostpone() string {
+	return "nothing to postpone right now"
+}
+
 func block(label, detail string) string {
 	return strings.Join([]string{"", "  " + label, "", "  " + detail}, "\n")
 }
