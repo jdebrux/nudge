@@ -99,7 +99,7 @@ func run(args []string, now time.Time) (int, error) {
 	case "await":
 		return applyAwait(path, current, cfg, now, args[1:])
 	case watch.Subcommand:
-		return 0, runWatch(path, args[1:])
+		return 0, runWatch(path, cfgPath, args[1:])
 	default:
 		return 0, fmt.Errorf("unknown command %q — try `nudge help`", cmd)
 	}
@@ -213,7 +213,7 @@ func runConfig(cfgPath string, cfg config.Config, args []string) error {
 		return fmt.Errorf("unknown config command %q", args[0])
 	}
 	if len(args) != 3 {
-		return fmt.Errorf("usage: nudge config set <focus|break|long-break|every> <value>")
+		return fmt.Errorf("usage: nudge config set <focus|break|long-break|every|repeat|repeat-limit> <value>")
 	}
 
 	key, value := args[1], args[2]
@@ -242,6 +242,18 @@ func runConfig(cfgPath string, cfg config.Config, args []string) error {
 			return fmt.Errorf("invalid session count %q", value)
 		}
 		cfg.SessionsPerLongBreak = n
+	case "repeat":
+		d, err := time.ParseDuration(value)
+		if err != nil {
+			return fmt.Errorf("invalid duration %q", value)
+		}
+		cfg.RepeatInterval = d
+	case "repeat-limit":
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 0 {
+			return fmt.Errorf("invalid repeat limit %q", value)
+		}
+		cfg.MaxRepeats = n
 	default:
 		return fmt.Errorf("unknown config key %q", key)
 	}
@@ -254,9 +266,8 @@ func runConfig(cfgPath string, cfg config.Config, args []string) error {
 }
 
 // runWatch is the hidden re-exec entry point spawned by save() to
-// deliver the terminal-bell cue for a timed phase. Not a user-facing
-// command.
-func runWatch(path string, args []string) error {
+// deliver the cue for a timed phase. Not a user-facing command.
+func runWatch(path, cfgPath string, args []string) error {
 	if len(args) != 3 {
 		return fmt.Errorf("%s: expected phase, since, and until", watch.Subcommand)
 	}
@@ -268,7 +279,7 @@ func runWatch(path string, args []string) error {
 	if err != nil {
 		return err
 	}
-	return watch.Wait(path, args[0], since, cueAt)
+	return watch.Wait(path, cfgPath, args[0], since, cueAt)
 }
 
 // bare is what a plain `nudge` runs: show status, or start the default
