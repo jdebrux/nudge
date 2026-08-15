@@ -18,6 +18,7 @@ import (
 const (
 	defaultFocusDuration = 25 * time.Minute
 	defaultBreakDuration = 5 * time.Minute
+	defaultLaterDelay    = 5 * time.Minute
 )
 
 func main() {
@@ -62,6 +63,8 @@ func run(args []string, now time.Time) error {
 		return applyOut(path, current, now, duration)
 	case "done":
 		return applyDone(path, current, now)
+	case "later":
+		return applyLater(path, current, now)
 	case watch.Subcommand:
 		return runWatch(path, args[1:])
 	default:
@@ -80,11 +83,11 @@ func runWatch(path string, args []string) error {
 	if err != nil {
 		return err
 	}
-	until, err := time.Parse(time.RFC3339Nano, args[2])
+	cueAt, err := time.Parse(time.RFC3339Nano, args[2])
 	if err != nil {
 		return err
 	}
-	return watch.Wait(path, args[0], since, until)
+	return watch.Wait(path, args[0], since, cueAt)
 }
 
 // bare is what a plain `nudge` runs: show status, or start the default
@@ -129,14 +132,42 @@ func applyDone(path string, current nudge.State, now time.Time) error {
 	return save(path, next, now)
 }
 
+// applyLater postpones the next cue without changing the current phase —
+// Since/Until stay put, only NextCue moves. It reuses persist() so the
+// rescheduled cue gets its own watcher, but prints a different one-line
+// echo than a real transition since nothing about the session itself
+// changed.
+func applyLater(path string, current nudge.State, now time.Time) error {
+	next, applied := current.Later(now, defaultLaterDelay)
+	if !applied {
+		fmt.Println(render.NothingToPostpone())
+		return nil
+	}
+	if err := persist(path, next); err != nil {
+		return err
+	}
+	fmt.Println(render.Postponed(next, now))
+	return nil
+}
+
 func save(path string, next nudge.State, now time.Time) error {
+	if err := persist(path, next); err != nil {
+		return err
+	}
+	fmt.Println(render.Status(next, now))
+	return nil
+}
+
+// persist saves state and, if it left a timed cue pending, spawns a
+// watcher for it. A failure to schedule the cue doesn't fail the
+// command — the state transition itself already succeeded.
+func persist(path string, next nudge.State) error {
 	if err := store.Save(path, next); err != nil {
 		return err
 	}
 	if err := watch.Spawn(next); err != nil {
 		fmt.Fprintln(os.Stderr, "nudge: couldn't schedule a cue:", err)
 	}
-	fmt.Println(render.Status(next, now))
 	return nil
 }
 
