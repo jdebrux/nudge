@@ -16,9 +16,9 @@ import (
 func Status(s nudge.State, now time.Time) string {
 	switch s.Phase {
 	case nudge.Focus:
-		return block(focusLabelStyle.Render(fmt.Sprintf("focus · %s", remaining(s, now))), bar(elapsedFraction(s, now), focusColor))
+		return block(labelStyle.Render(fmt.Sprintf("focus · %s", remaining(s, now))), bar(elapsedFraction(s, now)))
 	case nudge.Rest:
-		return block(restLabelStyle.Render(fmt.Sprintf("break · %s", remaining(s, now))), "time to step away.")
+		return block(labelStyle.Render(fmt.Sprintf("break · %s", remaining(s, now))), "time to step away.")
 	default:
 		return block("idle", hintStyle.Render("nudge in to start"))
 	}
