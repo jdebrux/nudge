@@ -1,18 +1,19 @@
 // Package watch delivers the proactive cue for a timed phase: a terminal
-// bell when it's due. nudge never occupies the foreground (every command
-// returns immediately), so the cue is delivered by a small detached
-// process spawned alongside whatever state transition set (or moved)
-// NextCue — nothing runs while IDLE, and nothing runs at all for
-// open-ended sessions.
+// bell plus a native notification, repeated on a bounded schedule until
+// acted on. nudge never occupies the foreground (every command returns
+// immediately), so the cue is delivered by a small detached process
+// spawned alongside whatever state transition set (or moved) NextCue —
+// nothing runs while IDLE, and nothing runs at all for open-ended
+// sessions.
 package watch
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"syscall"
 	"time"
 
+	"github.com/jdebrux/nudge/internal/config"
 	"github.com/jdebrux/nudge/internal/nudge"
 	"github.com/jdebrux/nudge/internal/store"
 )
@@ -21,10 +22,9 @@ import (
 const Subcommand = "__watch"
 
 // Spawn starts a detached process that waits until s.NextCue and then
-// rings the terminal bell — unless the state has moved on by then (an
-// early `done`, a new `in`/`out`, or a `later` that pushed the cue
-// further out). It is a no-op when there's no cue pending
-// (s.NextCue == nil).
+// fires the cue — unless the state has moved on by then (an early
+// `done`, a new `in`/`out`, or a `later` that pushed the cue further
+// out). It is a no-op when there's no cue pending (s.NextCue == nil).
 func Spawn(s nudge.State) error {
 	if s.NextCue == nil {
 		return nil
@@ -54,23 +54,44 @@ func Spawn(s nudge.State) error {
 	return cmd.Process.Release()
 }
 
-// Wait blocks until cueAt, then rings the terminal bell — but only if
-// the state persisted at path still has NextCue equal to cueAt. An
-// early `done`, a new `in`/`out`, or a `later` that rescheduled the cue
-// before then makes this particular cue stale, and Wait exits quietly
-// instead of ringing for a session that's moved on.
-func Wait(path, phase string, since, cueAt time.Time) error {
-	time.Sleep(time.Until(cueAt))
-
-	current, err := store.Load(path)
+// Wait blocks until cueAt, then fires the cue (bell + native
+// notification) — but only if the state persisted at statePath still
+// has NextCue equal to cueAt. An early `done`, a new `in`/`out`, or a
+// `later` that rescheduled the cue makes this particular cue stale, and
+// Wait skips firing instead of nagging about a session that's moved on.
+//
+// If the state is still current, the cue keeps firing every
+// RepeatInterval (re-read from configPath before each firing, so a
+// mid-wait config change takes effect) until either MaxRepeats firings
+// have happened or a later check finds the state has moved on —
+// checking status doesn't count as "acted on it" (status never mutates
+// state), only a real transition does.
+func Wait(statePath, configPath, phase string, since, cueAt time.Time) error {
+	cfg, err := config.Load(configPath)
 	if err != nil {
-		return err
-	}
-	if !stillCurrent(current, phase, since, cueAt) {
-		return nil
+		cfg = config.Default()
 	}
 
-	fmt.Fprint(os.Stdout, "\a")
+	for attempt := 0; attempt < cfg.MaxRepeats; attempt++ {
+		time.Sleep(time.Until(cueAt.Add(time.Duration(attempt) * cfg.RepeatInterval)))
+
+		current, err := store.Load(statePath)
+		if err != nil {
+			return err
+		}
+		if !stillCurrent(current, phase, since, cueAt) {
+			return nil
+		}
+
+		fire(phase)
+
+		// Reload before the next iteration so a mid-wait config change
+		// (a different interval, a different limit) takes effect on
+		// the remaining repeats rather than only on the next Spawn.
+		if fresh, err := config.Load(configPath); err == nil {
+			cfg = fresh
+		}
+	}
 	return nil
 }
 

@@ -4,9 +4,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/jdebrux/nudge/internal/config"
 	"github.com/jdebrux/nudge/internal/nudge"
 	"github.com/jdebrux/nudge/internal/store"
 )
@@ -51,43 +53,149 @@ func TestStillCurrentDetectsLaterPostponement(t *testing.T) {
 	}
 }
 
-func TestWaitFiresBellWhenStateStillMatches(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "state.json")
-	target := time.Now().Add(20 * time.Millisecond)
+func TestWaitFiresOnceAndStopsWhenRepeatLimitIsOne(t *testing.T) {
+	dir := t.TempDir()
+	statePath := filepath.Join(dir, "state.json")
+	cfgPath := filepath.Join(dir, "config.json")
+
+	target := time.Now().Add(15 * time.Millisecond)
 	s := nudge.State{Phase: nudge.Focus, Since: time.Now(), Until: &target, NextCue: &target}
-	if err := store.Save(path, s); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
+	mustSave(t, statePath, s)
+	mustSaveConfig(t, cfgPath, config.Config{RepeatInterval: 15 * time.Millisecond, MaxRepeats: 1})
+
+	notifications := stubNotify(t)
 
 	out := captureStdout(t, func() {
-		if err := Wait(path, "focus", s.Since, target); err != nil {
+		if err := Wait(statePath, cfgPath, "focus", s.Since, target); err != nil {
 			t.Fatalf("Wait: %v", err)
 		}
 	})
 
 	if out != "\a" {
-		t.Fatalf("stdout = %q, want a bell character", out)
+		t.Fatalf("stdout = %q, want exactly one bell", out)
+	}
+	if len(*notifications) != 1 {
+		t.Fatalf("notifications = %d, want exactly 1", len(*notifications))
+	}
+}
+
+func TestWaitRepeatsUpToTheConfiguredLimit(t *testing.T) {
+	dir := t.TempDir()
+	statePath := filepath.Join(dir, "state.json")
+	cfgPath := filepath.Join(dir, "config.json")
+
+	target := time.Now().Add(15 * time.Millisecond)
+	s := nudge.State{Phase: nudge.Rest, Since: time.Now(), Until: &target, NextCue: &target}
+	mustSave(t, statePath, s)
+	mustSaveConfig(t, cfgPath, config.Config{RepeatInterval: 15 * time.Millisecond, MaxRepeats: 3})
+
+	notifications := stubNotify(t)
+
+	out := captureStdout(t, func() {
+		if err := Wait(statePath, cfgPath, "rest", s.Since, target); err != nil {
+			t.Fatalf("Wait: %v", err)
+		}
+	})
+
+	if got := strings.Count(out, "\a"); got != 3 {
+		t.Fatalf("bell count = %d, want 3 (content: %q)", got, out)
+	}
+	if len(*notifications) != 3 {
+		t.Fatalf("notifications = %d, want 3", len(*notifications))
+	}
+	for _, n := range *notifications {
+		if n.title != "nudge" || !strings.Contains(n.message, "back to focus") {
+			t.Fatalf("notification = %+v, want a rest-phase message", n)
+		}
+	}
+}
+
+func TestWaitStopsRepeatingWhenStateMovesOnMidway(t *testing.T) {
+	dir := t.TempDir()
+	statePath := filepath.Join(dir, "state.json")
+	cfgPath := filepath.Join(dir, "config.json")
+
+	sessionSince := time.Now()
+	target := sessionSince.Add(15 * time.Millisecond)
+	mustSave(t, statePath, nudge.State{Phase: nudge.Focus, Since: sessionSince, Until: &target, NextCue: &target})
+	mustSaveConfig(t, cfgPath, config.Config{RepeatInterval: 30 * time.Millisecond, MaxRepeats: 5})
+
+	stubNotify(t)
+
+	// Simulate a `done` landing shortly after the first firing — well
+	// before the 5-repeat budget would otherwise be exhausted.
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+		_ = store.Save(statePath, nudge.State{Phase: nudge.Idle, Since: time.Now()})
+	}()
+
+	out := captureStdout(t, func() {
+		if err := Wait(statePath, cfgPath, "focus", sessionSince, target); err != nil {
+			t.Fatalf("Wait: %v", err)
+		}
+	})
+
+	bells := strings.Count(out, "\a")
+	if bells < 1 {
+		t.Fatalf("expected at least one bell before the state changed, got %d", bells)
+	}
+	if bells >= 5 {
+		t.Fatalf("expected fewer than the 5-repeat limit since state moved on, got %d", bells)
 	}
 }
 
 func TestWaitStaysQuietWhenStateMovedOn(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "state.json")
+	dir := t.TempDir()
+	statePath := filepath.Join(dir, "state.json")
+	cfgPath := filepath.Join(dir, "config.json")
+
 	sessionSince := time.Now()
-	target := sessionSince.Add(20 * time.Millisecond)
+	target := sessionSince.Add(15 * time.Millisecond)
+	mustSaveConfig(t, cfgPath, config.Config{RepeatInterval: time.Minute, MaxRepeats: 3})
 
 	// Simulate a `done` that landed before the watcher wakes up.
-	if err := store.Save(path, nudge.State{Phase: nudge.Idle, Since: sessionSince}); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
+	mustSave(t, statePath, nudge.State{Phase: nudge.Idle, Since: sessionSince})
+
+	stubNotify(t)
 
 	out := captureStdout(t, func() {
-		if err := Wait(path, "focus", sessionSince, target); err != nil {
+		if err := Wait(statePath, cfgPath, "focus", sessionSince, target); err != nil {
 			t.Fatalf("Wait: %v", err)
 		}
 	})
 
 	if out != "" {
 		t.Fatalf("stdout = %q, want no output for a stale cue", out)
+	}
+}
+
+type notification struct{ title, message string }
+
+// stubNotify replaces the package's real osascript call with a
+// recorder for the duration of the test — without this, running these
+// tests on a Mac would pop a real notification for every firing.
+func stubNotify(t *testing.T) *[]notification {
+	t.Helper()
+	var got []notification
+	original := sendNotification
+	sendNotification = func(title, message string) {
+		got = append(got, notification{title, message})
+	}
+	t.Cleanup(func() { sendNotification = original })
+	return &got
+}
+
+func mustSave(t *testing.T, path string, s nudge.State) {
+	t.Helper()
+	if err := store.Save(path, s); err != nil {
+		t.Fatalf("store.Save: %v", err)
+	}
+}
+
+func mustSaveConfig(t *testing.T, path string, c config.Config) {
+	t.Helper()
+	if err := config.Save(path, c); err != nil {
+		t.Fatalf("config.Save: %v", err)
 	}
 }
 
