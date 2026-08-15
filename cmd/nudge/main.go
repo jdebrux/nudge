@@ -57,27 +57,67 @@ func run(args []string, now time.Time) error {
 		fmt.Println(render.Status(current, now))
 		return nil
 	case "in":
-		duration, err := parseDuration(args[1:], cfg.Focus)
+		explicit, err := parseExplicitDuration(args[1:])
 		if err != nil {
 			return err
+		}
+		duration := cfg.Focus
+		if explicit != nil {
+			duration = *explicit
 		}
 		return applyIn(path, current, now, duration)
 	case "out":
-		duration, err := parseDuration(args[1:], cfg.Break)
+		explicit, err := parseExplicitDuration(args[1:])
 		if err != nil {
 			return err
 		}
-		return applyOut(path, current, now, duration)
+		return applyOut(path, current, cfg, now, explicit)
 	case "done":
 		return applyDone(path, current, now)
 	case "later":
 		return applyLater(path, current, now)
 	case "config":
 		return runConfig(cfgPath, cfg, args[1:])
+	case "loop":
+		return runLoop(path, current, args[1:])
 	case watch.Subcommand:
 		return runWatch(path, args[1:])
 	default:
 		return fmt.Errorf("unknown command %q", cmd)
+	}
+}
+
+// runLoop handles `nudge loop start` and `nudge loop stop`.
+func runLoop(path string, current nudge.State, args []string) error {
+	if len(args) != 1 {
+		return fmt.Errorf("usage: nudge loop <start|stop>")
+	}
+
+	switch args[0] {
+	case "start":
+		next, applied := current.StartLoop()
+		if !applied {
+			fmt.Println(render.LoopAlreadyActive())
+			return nil
+		}
+		if err := store.Save(path, next); err != nil {
+			return err
+		}
+		fmt.Println(render.LoopStarted())
+		return nil
+	case "stop":
+		next, applied := current.StopLoop()
+		if !applied {
+			fmt.Println(render.LoopAlreadyInactive())
+			return nil
+		}
+		if err := store.Save(path, next); err != nil {
+			return err
+		}
+		fmt.Println(render.LoopStopped())
+		return nil
+	default:
+		return fmt.Errorf("unknown loop command %q", args[0])
 	}
 }
 
@@ -170,8 +210,27 @@ func applyIn(path string, current nudge.State, now time.Time, duration time.Dura
 	return save(path, next, now)
 }
 
-func applyOut(path string, current nudge.State, now time.Time, duration time.Duration) error {
-	next, applied := current.Out(now, duration)
+// applyOut ends a focus session. With no explicit duration, an active
+// loop gets a say: it counts the completed focus session and escalates
+// to cfg.LongBreak every Nth one (per cfg.SessionsPerLongBreak) instead
+// of the plain cfg.Break. An explicit duration bypasses loop bookkeeping
+// entirely — the user's call always wins.
+func applyOut(path string, current nudge.State, cfg config.Config, now time.Time, explicit *time.Duration) error {
+	working := current
+	duration := cfg.Break
+
+	switch {
+	case explicit != nil:
+		duration = *explicit
+	case current.Phase == nudge.Focus && current.LoopActive:
+		var dueForLongBreak bool
+		working, dueForLongBreak = current.CompletedFocusSession(cfg.SessionsPerLongBreak)
+		if dueForLongBreak {
+			duration = cfg.LongBreak
+		}
+	}
+
+	next, applied := working.Out(now, duration)
 	if !applied {
 		if current.Phase == nudge.Idle {
 			fmt.Println(render.NotFocused())
@@ -231,13 +290,18 @@ func persist(path string, next nudge.State) error {
 	return nil
 }
 
-func parseDuration(args []string, fallback time.Duration) (time.Duration, error) {
+// parseExplicitDuration parses an optional duration argument, returning
+// nil (not an error) when none was given — callers need to tell "nothing
+// specified, use the default" apart from "specified explicitly", since
+// applyOut only lets loop's long-break escalation apply in the former
+// case.
+func parseExplicitDuration(args []string) (*time.Duration, error) {
 	if len(args) == 0 {
-		return fallback, nil
+		return nil, nil
 	}
 	d, err := time.ParseDuration(args[0])
 	if err != nil {
-		return 0, fmt.Errorf("invalid duration %q", args[0])
+		return nil, fmt.Errorf("invalid duration %q", args[0])
 	}
-	return d, nil
+	return &d, nil
 }
