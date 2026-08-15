@@ -16,6 +16,8 @@ func ConfigSummary(c config.Config) string {
 		{"break", c.Break.String()},
 		{"long break", c.LongBreak.String()},
 		{"every", fmt.Sprintf("%d sessions", c.SessionsPerLongBreak)},
+		{"repeat", c.RepeatInterval.String()},
+		{"repeat limit", fmt.Sprintf("%d times", c.MaxRepeats)},
 	}
 
 	width := 0

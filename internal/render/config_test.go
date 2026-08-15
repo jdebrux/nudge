@@ -9,11 +9,28 @@ import (
 )
 
 func TestConfigSummary(t *testing.T) {
-	c := config.Config{Focus: 25 * time.Minute, Break: 5 * time.Minute, LongBreak: 15 * time.Minute, SessionsPerLongBreak: 4}
+	c := config.Config{
+		Focus: 25 * time.Minute, Break: 5 * time.Minute, LongBreak: 15 * time.Minute, SessionsPerLongBreak: 4,
+		RepeatInterval: 5 * time.Minute, MaxRepeats: 6,
+	}
 
 	got := ConfigSummary(c)
 
-	for _, want := range []string{"focus       25m0s", "break       5m0s", "long break  15m0s", "every       4 sessions"} {
+	// "repeat limit" (12 chars) is the longest label, so every row pads
+	// to that width + 2 — computed here rather than hand-counted, since
+	// hand-typed padding is exactly the kind of thing that silently
+	// drifts when a row is added.
+	const width = len("repeat limit") + 2
+	pad := func(label string) string { return label + strings.Repeat(" ", width-len(label)) }
+
+	for _, want := range []string{
+		pad("focus") + "25m0s",
+		pad("break") + "5m0s",
+		pad("long break") + "15m0s",
+		pad("every") + "4 sessions",
+		pad("repeat") + "5m0s",
+		pad("repeat limit") + "6 times",
+	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("ConfigSummary() = %q, want it to contain %q", got, want)
 		}
