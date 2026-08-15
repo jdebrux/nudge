@@ -18,11 +18,15 @@ import (
 // Config holds nudge's adjustable defaults. It applies to every
 // no-argument `in`/`out` regardless of whether a loop is active — loop
 // only adds the long-break escalation on top, using SessionsPerLongBreak.
+// RepeatInterval/MaxRepeats govern how a missed cue re-fires — see
+// internal/watch.
 type Config struct {
 	Focus                time.Duration
 	Break                time.Duration
 	LongBreak            time.Duration
 	SessionsPerLongBreak int
+	RepeatInterval       time.Duration
+	MaxRepeats           int
 }
 
 // Default returns the values nudge has always used before config existed.
@@ -32,6 +36,8 @@ func Default() Config {
 		Break:                5 * time.Minute,
 		LongBreak:            15 * time.Minute,
 		SessionsPerLongBreak: 4,
+		RepeatInterval:       5 * time.Minute,
+		MaxRepeats:           6,
 	}
 }
 
@@ -43,6 +49,8 @@ type configJSON struct {
 	Break                string `json:"break"`
 	LongBreak            string `json:"long_break"`
 	SessionsPerLongBreak int    `json:"sessions_per_long_break"`
+	RepeatInterval       string `json:"repeat_interval"`
+	MaxRepeats           int    `json:"max_repeats"`
 }
 
 func (c Config) MarshalJSON() ([]byte, error) {
@@ -51,6 +59,8 @@ func (c Config) MarshalJSON() ([]byte, error) {
 		Break:                c.Break.String(),
 		LongBreak:            c.LongBreak.String(),
 		SessionsPerLongBreak: c.SessionsPerLongBreak,
+		RepeatInterval:       c.RepeatInterval.String(),
+		MaxRepeats:           c.MaxRepeats,
 	})
 }
 
@@ -72,11 +82,17 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 	if err != nil {
 		return err
 	}
+	repeatInterval, err := time.ParseDuration(aux.RepeatInterval)
+	if err != nil {
+		return err
+	}
 
 	c.Focus = focus
 	c.Break = brk
 	c.LongBreak = longBreak
 	c.SessionsPerLongBreak = aux.SessionsPerLongBreak
+	c.RepeatInterval = repeatInterval
+	c.MaxRepeats = aux.MaxRepeats
 	return nil
 }
 
