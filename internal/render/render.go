@@ -24,6 +24,22 @@ func Status(s nudge.State, now time.Time) string {
 	}
 }
 
+// Prompt renders a compact, single-line status meant for embedding in a
+// shell prompt, tmux status bar, or starship module — plain text, no
+// lipgloss styling at all, since the embedding framework applies its
+// own theme. Empty for IDLE, so an optional prompt segment naturally
+// disappears when nudge isn't tracking anything.
+func Prompt(s nudge.State, now time.Time) string {
+	switch s.Phase {
+	case nudge.Focus:
+		return fmt.Sprintf("focus · %s", remaining(s, now))
+	case nudge.Rest:
+		return fmt.Sprintf("break · %s", remaining(s, now))
+	default:
+		return ""
+	}
+}
+
 // AlreadyFocused is the no-op echo for `nudge in` while already in FOCUS.
 func AlreadyFocused(s nudge.State, now time.Time) string {
 	return hintStyle.Render("already focused" + remainingSuffix(s, now))

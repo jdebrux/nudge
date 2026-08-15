@@ -59,6 +59,35 @@ func TestStatusFocusClampsPastDeadlineToZero(t *testing.T) {
 	}
 }
 
+func TestPromptFocusAndRest(t *testing.T) {
+	focusUntil := now.Add(18*time.Minute + 42*time.Second)
+	focused := nudge.State{Phase: nudge.Focus, Since: now.Add(-6 * time.Minute), Until: &focusUntil}
+	if got, want := Prompt(focused, now), "focus · 18:42"; got != want {
+		t.Fatalf("Prompt(focus) = %q, want %q", got, want)
+	}
+
+	restUntil := now.Add(4*time.Minute + 51*time.Second)
+	resting := nudge.State{Phase: nudge.Rest, Since: now.Add(-10 * time.Minute), Until: &restUntil}
+	if got, want := Prompt(resting, now), "break · 04:51"; got != want {
+		t.Fatalf("Prompt(rest) = %q, want %q", got, want)
+	}
+}
+
+func TestPromptIdleIsEmpty(t *testing.T) {
+	if got := Prompt(nudge.State{Phase: nudge.Idle}, now); got != "" {
+		t.Fatalf("Prompt(idle) = %q, want empty string", got)
+	}
+}
+
+func TestPromptHasNoANSIStyling(t *testing.T) {
+	until := now.Add(time.Minute)
+	s := nudge.State{Phase: nudge.Focus, Since: now, Until: &until}
+	got := Prompt(s, now)
+	if strings.Contains(got, "\x1b[") {
+		t.Fatalf("Prompt() = %q, want plain text with no ANSI escapes", got)
+	}
+}
+
 func TestNoOpMessages(t *testing.T) {
 	until := now.Add(4*time.Minute + 51*time.Second)
 	resting := nudge.State{Phase: nudge.Rest, Since: now, Until: &until}
