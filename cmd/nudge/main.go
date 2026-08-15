@@ -38,6 +38,11 @@ func main() {
 // deployment scenario, §5): it runs a child command itself and mirrors
 // that child's exit code back out.
 func run(args []string, now time.Time) (int, error) {
+	if len(args) > 0 && isHelp(args[0]) {
+		fmt.Println(render.Help())
+		return 0, nil
+	}
+
 	path, err := store.DefaultPath()
 	if err != nil {
 		return 0, err
@@ -96,8 +101,12 @@ func run(args []string, now time.Time) (int, error) {
 	case watch.Subcommand:
 		return 0, runWatch(path, args[1:])
 	default:
-		return 0, fmt.Errorf("unknown command %q", cmd)
+		return 0, fmt.Errorf("unknown command %q — try `nudge help`", cmd)
 	}
+}
+
+func isHelp(arg string) bool {
+	return arg == "help" || arg == "-h" || arg == "--help"
 }
 
 // applyAwait runs cmdArgs itself, blocking until it exits. It behaves
