@@ -18,7 +18,7 @@ func Status(s nudge.State, now time.Time) string {
 	case nudge.Focus:
 		return block(labelStyle.Render(fmt.Sprintf("focus · %s", remaining(s, now))), bar(elapsedFraction(s, now)))
 	case nudge.Rest:
-		return block(labelStyle.Render(fmt.Sprintf("break · %s", remaining(s, now))), "time to step away.")
+		return block(labelStyle.Render(fmt.Sprintf("break · %s", remaining(s, now))), hintStyle.Render("time to step away."))
 	default:
 		return block("idle", hintStyle.Render("nudge in to start"))
 	}
@@ -26,34 +26,34 @@ func Status(s nudge.State, now time.Time) string {
 
 // AlreadyFocused is the no-op echo for `nudge in` while already in FOCUS.
 func AlreadyFocused(s nudge.State, now time.Time) string {
-	return "already focused" + remainingSuffix(s, now)
+	return hintStyle.Render("already focused" + remainingSuffix(s, now))
 }
 
 // NotFocused is the no-op echo for `nudge out` while IDLE — you can't take
 // a break from work you haven't started.
 func NotFocused() string {
-	return "not focused right now"
+	return hintStyle.Render("not focused right now")
 }
 
 // AlreadyOnABreak is the no-op echo for `nudge out` while already in REST.
 func AlreadyOnABreak(s nudge.State, now time.Time) string {
-	return "already on a break" + remainingSuffix(s, now)
+	return hintStyle.Render("already on a break" + remainingSuffix(s, now))
 }
 
 // AlreadyIdle is the no-op echo for `nudge done` while already IDLE.
 func AlreadyIdle() string {
-	return "already idle"
+	return hintStyle.Render("already idle")
 }
 
 // Postponed is the echo for a successful `nudge later`.
 func Postponed(s nudge.State, now time.Time) string {
-	return fmt.Sprintf("nudging again in %s", clock(*s.NextCue, now))
+	return hintStyle.Render(fmt.Sprintf("nudging again in %s", clock(*s.NextCue, now)))
 }
 
 // NothingToPostpone is the no-op echo for `nudge later` when there's no
 // timed cue pending (IDLE, or an open-ended session).
 func NothingToPostpone() string {
-	return "nothing to postpone right now"
+	return hintStyle.Render("nothing to postpone right now")
 }
 
 func block(label, detail string) string {

@@ -12,6 +12,7 @@ var (
 	dimColor = lipgloss.AdaptiveColor{Light: "#78716C", Dark: "#A8A29E"}
 
 	labelStyle = lipgloss.NewStyle().Foreground(primaryColor).Bold(true)
+	valueStyle = lipgloss.NewStyle().Foreground(primaryColor)
 	hintStyle  = lipgloss.NewStyle().Foreground(dimColor)
 )
 

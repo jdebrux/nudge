@@ -29,7 +29,8 @@ func Help() string {
 
 	lines := []string{""}
 	for _, r := range helpRows {
-		lines = append(lines, "  "+r.cmd+strings.Repeat(" ", width-len(r.cmd)+2)+r.desc)
+		cmd := valueStyle.Render(r.cmd + strings.Repeat(" ", width-len(r.cmd)+2))
+		lines = append(lines, "  "+cmd+hintStyle.Render(r.desc))
 	}
 	return strings.Join(lines, "\n")
 }
