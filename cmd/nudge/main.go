@@ -7,19 +7,17 @@ package main
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
+	"github.com/jdebrux/nudge/internal/config"
 	"github.com/jdebrux/nudge/internal/nudge"
 	"github.com/jdebrux/nudge/internal/render"
 	"github.com/jdebrux/nudge/internal/store"
 	"github.com/jdebrux/nudge/internal/watch"
 )
 
-const (
-	defaultFocusDuration = 25 * time.Minute
-	defaultBreakDuration = 5 * time.Minute
-	defaultLaterDelay    = 5 * time.Minute
-)
+const defaultLaterDelay = 5 * time.Minute
 
 func main() {
 	if err := run(os.Args[1:], time.Now()); err != nil {
@@ -38,6 +36,15 @@ func run(args []string, now time.Time) error {
 		return err
 	}
 
+	cfgPath, err := config.DefaultPath()
+	if err != nil {
+		return err
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		return err
+	}
+
 	var cmd string
 	if len(args) > 0 {
 		cmd = args[0]
@@ -45,18 +52,18 @@ func run(args []string, now time.Time) error {
 
 	switch cmd {
 	case "":
-		return bare(path, current, now)
+		return bare(path, current, cfg, now)
 	case "status":
 		fmt.Println(render.Status(current, now))
 		return nil
 	case "in":
-		duration, err := parseDuration(args[1:], defaultFocusDuration)
+		duration, err := parseDuration(args[1:], cfg.Focus)
 		if err != nil {
 			return err
 		}
 		return applyIn(path, current, now, duration)
 	case "out":
-		duration, err := parseDuration(args[1:], defaultBreakDuration)
+		duration, err := parseDuration(args[1:], cfg.Break)
 		if err != nil {
 			return err
 		}
@@ -65,11 +72,64 @@ func run(args []string, now time.Time) error {
 		return applyDone(path, current, now)
 	case "later":
 		return applyLater(path, current, now)
+	case "config":
+		return runConfig(cfgPath, cfg, args[1:])
 	case watch.Subcommand:
 		return runWatch(path, args[1:])
 	default:
 		return fmt.Errorf("unknown command %q", cmd)
 	}
+}
+
+// runConfig handles bare `nudge config` (show current defaults) and
+// `nudge config set <key> <value>`.
+func runConfig(cfgPath string, cfg config.Config, args []string) error {
+	if len(args) == 0 {
+		fmt.Println(render.ConfigSummary(cfg))
+		return nil
+	}
+	if args[0] != "set" {
+		return fmt.Errorf("unknown config command %q", args[0])
+	}
+	if len(args) != 3 {
+		return fmt.Errorf("usage: nudge config set <focus|break|long-break|every> <value>")
+	}
+
+	key, value := args[1], args[2]
+	switch key {
+	case "focus":
+		d, err := time.ParseDuration(value)
+		if err != nil {
+			return fmt.Errorf("invalid duration %q", value)
+		}
+		cfg.Focus = d
+	case "break":
+		d, err := time.ParseDuration(value)
+		if err != nil {
+			return fmt.Errorf("invalid duration %q", value)
+		}
+		cfg.Break = d
+	case "long-break":
+		d, err := time.ParseDuration(value)
+		if err != nil {
+			return fmt.Errorf("invalid duration %q", value)
+		}
+		cfg.LongBreak = d
+	case "every":
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 1 {
+			return fmt.Errorf("invalid session count %q", value)
+		}
+		cfg.SessionsPerLongBreak = n
+	default:
+		return fmt.Errorf("unknown config key %q", key)
+	}
+
+	if err := config.Save(cfgPath, cfg); err != nil {
+		return err
+	}
+	fmt.Println(render.ConfigUpdated(key, value))
+	return nil
 }
 
 // runWatch is the hidden re-exec entry point spawned by save() to
@@ -93,9 +153,9 @@ func runWatch(path string, args []string) error {
 // bare is what a plain `nudge` runs: show status, or start the default
 // rhythm if nothing is running — never a surprise action either way
 // (PRODUCT.md §5).
-func bare(path string, current nudge.State, now time.Time) error {
+func bare(path string, current nudge.State, cfg config.Config, now time.Time) error {
 	if current.Phase == nudge.Idle {
-		return applyIn(path, current, now, defaultFocusDuration)
+		return applyIn(path, current, now, cfg.Focus)
 	}
 	fmt.Println(render.Status(current, now))
 	return nil
