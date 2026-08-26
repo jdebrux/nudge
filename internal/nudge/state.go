@@ -65,6 +65,13 @@ type State struct {
 	SessionsCompleted int        `json:"sessions_completed,omitempty"` // completed focus sessions since the loop started
 }
 
+// Overdue reports whether a timed phase has run past its end without
+// anything acting on it yet. IDLE and open-ended sessions (Until == nil)
+// are never overdue — there's no deadline to have missed.
+func (s State) Overdue(now time.Time) bool {
+	return s.Until != nil && now.After(*s.Until)
+}
+
 // In begins a focus period, from IDLE or REST — one verb covers both,
 // since the state already determines which applies. Calling In while
 // already in FOCUS is a no-op.

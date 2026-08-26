@@ -7,6 +7,31 @@ import (
 
 var now = time.Date(2026, 8, 11, 9, 0, 0, 0, time.UTC)
 
+func TestOverdue(t *testing.T) {
+	past := now.Add(-1 * time.Minute)
+	future := now.Add(1 * time.Minute)
+
+	cases := []struct {
+		name string
+		s    State
+		want bool
+	}{
+		{"focus past its deadline is overdue", State{Phase: Focus, Until: &past}, true},
+		{"rest past its deadline is overdue", State{Phase: Rest, Until: &past}, true},
+		{"focus not yet at its deadline is not overdue", State{Phase: Focus, Until: &future}, false},
+		{"open-ended focus is never overdue", State{Phase: Focus}, false},
+		{"idle is never overdue", State{Phase: Idle}, false},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := c.s.Overdue(now); got != c.want {
+				t.Fatalf("Overdue() = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
 func TestTransitions(t *testing.T) {
 	cases := []struct {
 		name        string
