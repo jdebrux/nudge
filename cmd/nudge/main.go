@@ -12,11 +12,13 @@ import (
 	"strconv"
 	"time"
 
+	"charm.land/huh/v2"
 	"github.com/jdebrux/nudge/internal/config"
 	"github.com/jdebrux/nudge/internal/nudge"
 	"github.com/jdebrux/nudge/internal/render"
 	"github.com/jdebrux/nudge/internal/store"
 	"github.com/jdebrux/nudge/internal/watch"
+	"golang.org/x/term"
 )
 
 const defaultLaterDelay = 5 * time.Minute
@@ -285,15 +287,71 @@ func runWatch(path, cfgPath string, args []string) error {
 	return watch.Wait(path, cfgPath, args[0], since, cueAt)
 }
 
-// bare is what a plain `nudge` runs: show status, or start the default
-// rhythm if nothing is running — never a surprise action either way
-// (PRODUCT.md §5).
+// bare is what a plain `nudge` runs: show status, start the default
+// rhythm if nothing is running, or — if a timed session has run past
+// its end — offer a picker for what happens next. Never a surprise
+// action either way (PRODUCT.md §5): the picker only ever appears
+// instead of a status you'd otherwise have to interpret yourself, and
+// cancelling it is a true no-op.
 func bare(path string, current nudge.State, cfg config.Config, now time.Time) error {
 	if current.Phase == nudge.Idle {
 		return applyIn(path, current, now, cfg.Focus)
 	}
+	if current.Overdue(now) && isInteractiveTerminal() {
+		return promptNextStep(path, current, cfg, now)
+	}
 	fmt.Println(render.Status(current, now))
 	return nil
+}
+
+// isInteractiveTerminal reports whether both stdin and stdout are real
+// terminals. The picker only makes sense there — a piped or scripted
+// invocation (or `nudge` run as part of another tool) falls back to
+// plain status instead of hanging on a form with no one to answer it.
+func isInteractiveTerminal() bool {
+	return term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
+}
+
+// promptNextStep offers a choice between the two transitions the state
+// machine actually supports from an overdue phase — the natural next
+// step (out from FOCUS, in from REST) or stopping entirely — and
+// applies whichever is chosen via the same applyOut/applyIn/applyDone
+// every other command uses, so loop escalation, persistence, and
+// watcher spawning all come for free. Cancelling (Ctrl-C/Esc) leaves
+// state untouched and just prints plain status, same as any other
+// no-op in nudge.
+func promptNextStep(path string, current nudge.State, cfg config.Config, now time.Time) error {
+	const (
+		choicePrimary = "primary"
+		choiceStop    = "stop"
+	)
+
+	var choice string
+	form := huh.NewForm(huh.NewGroup(
+		huh.NewSelect[string]().
+			Title(render.OverduePromptTitle(current.Phase)).
+			Options(
+				huh.NewOption(render.OverduePromptPrimaryLabel(current.Phase), choicePrimary),
+				huh.NewOption(render.StopForNowLabel(), choiceStop),
+			).
+			Value(&choice),
+	))
+
+	if err := form.Run(); err != nil {
+		if errors.Is(err, huh.ErrUserAborted) {
+			fmt.Println(render.Status(current, now))
+			return nil
+		}
+		return err
+	}
+
+	if choice == choiceStop {
+		return applyDone(path, current, now)
+	}
+	if current.Phase == nudge.Rest {
+		return applyIn(path, current, now, cfg.Focus)
+	}
+	return applyOut(path, current, cfg, now, nil)
 }
 
 func applyIn(path string, current nudge.State, now time.Time, duration time.Duration) error {
