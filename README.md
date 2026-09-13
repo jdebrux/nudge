@@ -1,5 +1,7 @@
 # nudge
 
+![nudge](nudge-dithered.png)
+
 [![Go Reference](https://img.shields.io/badge/go-1.26-blue)](go.mod)
 
 A quiet CLI companion for building a healthier rhythm when focussing. nudge tracks one thing: **focus → pause
